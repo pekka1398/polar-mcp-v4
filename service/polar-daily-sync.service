@@ -1,0 +1,20 @@
+[Unit]
+Description=polarflow — 每天同步 AccessLink 新紀錄 + 補上 Polar Flow 網頁筆記
+Documentation=file:///home/pekka/Desktop/polarflow/README.md
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/pekka/Desktop/polarflow
+ExecStart=/home/pekka/Desktop/polarflow/daily_sync.sh
+
+# 兩支腳本都是 headless、不用假裝真人瀏覽器，跟 fb-reader 那個不一樣 -- 不需要
+# Xvfb。fetch 那步如果 Polar Flow 的 session 過期，is_logged_in() 會直接印訊息
+# 並回傳非 0，這次跑就算失敗、寫進 journal，但不會卡住下一次排程；重新
+# `./polar_web.py login` 一次就恢復正常，不用重裝這個 unit。
+
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=PYTHONUNBUFFERED=1
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=polar-daily-sync

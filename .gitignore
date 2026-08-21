@@ -1,0 +1,10 @@
+.env
+data/
+legacy/
+.venv/
+__pycache__/
+chrome-profile*
+*.html
+analysis/
+.claude/
+*.pyc

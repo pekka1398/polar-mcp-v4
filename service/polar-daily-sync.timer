@@ -1,0 +1,12 @@
+[Unit]
+Description=每天觸發一次 polar-daily-sync.service
+
+[Timer]
+OnCalendar=*-*-* 09:00:00
+# 開機/喚醒時如果錯過了排定時間，補跑一次 -- 不用等到隔天。
+Persistent=true
+# 跟其他排程錯開幾分鐘，單純習慣，這台機器上沒有其他東西會撞在同一秒。
+RandomizedDelaySec=180
+
+[Install]
+WantedBy=timers.target
