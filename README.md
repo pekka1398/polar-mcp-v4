@@ -43,17 +43,109 @@ records. One API, one auth flow, no binary file parsing.
 
 ## Setup
 
-1. Register a client at <https://admin.polaraccesslink.com>.
-2. Get an authorization code via the v4 OAuth flow
-   (`https://auth.polar.com/oauth/authorize`) with the scopes you need
-   (`training_sessions:read calendar:read` at minimum), exchange it for a
-   refresh token, and put `ClientId`, `ClientSecret`, and
-   `PolarV4RefreshToken` in a `.env` file (see `polar_sync_v4.py`'s
-   `load_env()` for the expected format -- `export KEY="value"` lines).
-3. `uv venv .venv && uv pip install --python .venv/bin/python fastmcp requests matplotlib`
-4. `python3 polar_sync_v4.py --days 90` to backfill.
-5. Register the server with your MCP client, e.g.:
-   `claude mcp add polar-v4 -s user -- /path/to/.venv/bin/python /path/to/polar_mcp_v4.py`
+This is a local stdio MCP server, not a hosted one -- there's no
+`/mcp`-style automatic browser OAuth like remote MCP servers (e.g.
+TickTick's) offer. Auth is a one-time manual OAuth exchange whose result
+(a refresh token) gets saved to `.env`; after that, `polar_sync_v4.py`
+refreshes it automatically forever, so you only do this once.
+
+### 1. Register a client
+
+Go to <https://admin.polaraccesslink.com>, log in with your Polar Flow
+account, and create a client. Fill in any name/description. For "redirect
+URL", use `http://localhost:8080/callback` (it doesn't need to actually be
+running anything -- see step 3). Note down the **Client ID** and **Client
+Secret** it gives you.
+
+### 2. Get an authorization code
+
+Decide which scopes you need. At minimum `training_sessions:read
+calendar:read`; for the full feature set this repo uses, all of:
+
+```
+training_sessions:read calendar:read continuous_samples:read activity:read
+sleep:read routes:read user_devices:read sports:read training_target:read
+nightly_recharge:read skin_contact:read temperature:read tests:read
+account_data:read
+```
+
+(Some of those may come back rejected/unused depending on your account --
+that's fine, request them anyway and see what you actually get back in the
+token response's `scope` field.)
+
+Build this URL, filling in your own `client_id` and URL-encoded scope list,
+and open it in a browser:
+
+```
+https://auth.polar.com/oauth/authorize?response_type=code&client_id=YOUR_CLIENT_ID&redirect_uri=http%3A%2F%2Flocalhost%3A8080%2Fcallback&scope=YOUR_SPACE_DELIMITED_SCOPES_URL_ENCODED
+```
+
+Log in and approve. You'll get redirected to
+`http://localhost:8080/callback?code=XXXXXX` -- the page itself will fail
+to load (nothing is listening on `localhost:8080`, and that's fine), you
+only need the `code=` value from the URL bar.
+
+### 3. Exchange the code for tokens
+
+```bash
+CLIENT_ID="..."
+CLIENT_SECRET="..."
+CODE="XXXXXX"   # from the redirect URL above
+
+CREDENTIALS=$(echo -n "${CLIENT_ID}:${CLIENT_SECRET}" | base64 -w0)
+
+curl -X POST https://auth.polar.com/oauth/token \
+  -H "Authorization: Basic ${CREDENTIALS}" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -H "Accept: application/json" \
+  -d "grant_type=authorization_code&code=${CODE}&redirect_uri=http://localhost:8080/callback"
+```
+
+The response is JSON with `access_token`, `refresh_token`, and `scope`.
+You only need `refresh_token` -- `polar_sync_v4.py` mints its own access
+tokens from it on every run (they expire in ~1 hour; the refresh token
+lasts much longer and gets auto-rotated/persisted as needed).
+
+### 4. Write `.env`
+
+In the repo root, create `.env` (and `chmod 600` it -- it holds secrets):
+
+```bash
+export ClientId='YOUR_CLIENT_ID'
+export ClientSecret='YOUR_CLIENT_SECRET'
+export PolarV4RefreshToken="THE_REFRESH_TOKEN_FROM_STEP_3"
+```
+
+### 5. Install dependencies and backfill
+
+```bash
+uv venv .venv
+uv pip install --python .venv/bin/python fastmcp requests matplotlib
+python3 polar_sync_v4.py --days 90   # 90 is the v4 max in one run
+```
+
+Check `data/v4_sync.log` and `data/v4/sessions/` -- you should see one
+JSON file per training session.
+
+### 6. Register the MCP server
+
+For Claude Code, user-scoped (works from any directory, not just this
+one):
+
+```bash
+claude mcp add polar-v4 -s user -- /path/to/repo/.venv/bin/python /path/to/repo/polar_mcp_v4.py
+```
+
+Start a new Claude Code session and run `/mcp` -- you should see `polar-v4`
+listed as connected with 4 tools. For other MCP clients, point them at the
+same command (`/path/to/.venv/bin/python /path/to/polar_mcp_v4.py`) via
+stdio the way you'd add any local MCP server.
+
+### 7. Keep it fresh
+
+Wire up `service/` (systemd timer, runs `daily_sync.sh` -> `polar_sync_v4.py
+--days 7` once a day) or just re-run `python3 polar_sync_v4.py --days 7`
+by hand whenever you want new sessions / edited notes pulled in.
 
 ## Notes
 
